@@ -1,0 +1,22 @@
+cat > .gitignore << 'EOF'
+# Logid
+*.log
+
+# Temp
+temp/
+*.tmp
+
+# Secrets
+.env
+.env.local
+*.key
+
+# OS specific
+.DS_Store
+Thumbs.db
+EOF
+
+*.tfstate
+*.tfstate.backup
+crash.log
+output/
