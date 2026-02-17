@@ -1,49 +1,105 @@
-# =============================================================================
-# TERRAFORM SEADED JA PROVIDER
-# =============================================================================
-# Iga Terraform projekt algab sellega, et ütleme milliseid provider'eid vajame.
-# Provider on plugin, mis "räägib" mingi platvormiga - AWS, Azure, või nagu
-# meie puhul, kohaliku failisüsteemiga.
-
 terraform {
   required_providers {
-    # "local" on provider'i nimi, mida kasutame koodis
-    local = {
-      source  = "hashicorp/local"  # Kust Terraform selle laeb (Registry)
-      version = "~> 2.4"           # ~> tähendab: 2.4, 2.5, 2.9 OK, aga 3.0 mitte
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2"
     }
   }
 }
 
-# =============================================================================
-# RESSURSID - MIDA ME LOOME
-# =============================================================================
-# resource on Terraform'i põhielement - iga ressurss on üks "asi" mida hallata.
-# Süntaks: resource "TÜÜP" "NIMI" { seaded }
-#   - TÜÜP: tuleb provider'ist, määrab mida loome (local_file = fail)
-#   - NIMI: sina valid, kasutatakse viitamiseks teistes kohtades
-
-# Esimene fail - lihtne tekstifail
-resource "local_file" "greeting" {
-  # ${path.module} = kaust kus see .tf fail asub
-  # Terraform loob "output" kausta automaatselt kui seda pole
-  filename = "${path.module}/output/hello.txt"
-  
-  # Faili sisu - \n tähendab uut rida
-  content  = "Tere, Muudetud Terraform!\nVersioon2.0\n"
+variable "target_host" {
+  description = "Ubuntu serveri IP-aadress"
+  type        = string
+  default     = "10.0.208.20"
 }
 
-# Teine fail - konfiguratsioonifail
-resource "local_file" "config" {
-  filename = "${path.module}/output/app.conf"
+variable "ssh_user" {
+  description = "SSH kasutajanimi"
+  type        = string
+  default     = "kasutaja"
+}
+
+variable "ssh_private_key" {
+  description = "SSH privaatvõtme asukoht"
+  type        = string
+  default     = "~/.ssh/id_ed25519"
+}
+
+resource "null_resource" "web_deploy" {
   
-  # <<-EOT on "heredoc" - võimaldab kirjutada mitut rida
-  # ilma \n märkideta. Loetavam kui "rida1\nrida2\nrida3"
-  # EOT = End Of Text (võid kasutada mis tahes sõna, nt EOF)
-  content  = <<-EOT
-    server {
-      port = 8080
-      host = "localhost"
-    }
-  EOT
+  # ==========================================================================
+  # TRIGGER: filemd5() - automaatne redeploy kui fail muutub
+  # ==========================================================================
+  # filemd5() arvutab faili MD5 räsi (checksum).
+  # Kui fail muutub, muutub räsi, trigger muutub, ressurss luuakse uuesti.
+  #
+  # See on PAREM kui manuaalne version = "1", "2", "3"...
+  # sest sa ei pea meeles pidama versiooni muutmist.
+  triggers = {
+    html_hash = filemd5("${path.module}/files/index.html")
+  }
+
+  connection {
+    type        = "ssh"
+    host        = var.target_host
+    user        = var.ssh_user
+    private_key = file(pathexpand(var.ssh_private_key))
+    timeout     = "2m"
+  }
+
+  # ==========================================================================
+  # FILE PROVISIONER - kopeeri fail serverisse
+  # ==========================================================================
+  # source = kohalik fail (WinKlient)
+  # destination = asukoht serveris (Ubuntu)
+  #
+  # MIKS /tmp/? Sest meil pole õigust otse /var/www/html/ kirjutada.
+  # Kopeerime /tmp/ ja liigutame siis sudo'ga.
+  provisioner "file" {
+    source      = "${path.module}/files/index.html"   # Sinu arvutist
+    destination = "/tmp/index.html"                    # Serverisse /tmp/
+  }
+
+  # ==========================================================================
+  # REMOTE-EXEC - liiguta fail õigesse kohta ja käivita Nginx
+  # ==========================================================================
+  # Provisioner'id käivituvad JÄRJEKORRAS.
+  # Kõigepealt file (kopeeri), siis remote-exec (seadista).
+  provisioner "remote-exec" {
+    inline = [
+      # Kontrolli kas Nginx on olemas, paigalda kui pole
+      # command -v kontrollib kas käsk eksisteerib
+      # &> /dev/null peidab väljundi
+      "echo '>>> Kontrollin Nginx olemasolu...'",
+      "if ! command -v nginx &> /dev/null; then",
+      "  echo '>>> Paigaldan Nginx...'",
+      "  sudo apt-get update -qq",
+      "  sudo apt-get install -y -qq nginx",
+      "fi",
+
+      # Liiguta fail /tmp/ -> /var/www/html/
+      # mv on kiirem kui cp + rm
+      "echo '>>> Kopeerin veebilehe...'",
+      "sudo mv /tmp/index.html /var/www/html/index.html",
+      
+      # Muuda omanik www-data'ks (Nginx kasutaja)
+      "sudo chown www-data:www-data /var/www/html/index.html",
+
+      # Taaskäivita Nginx, et muudatused rakenduks
+      "echo '>>> Taaskäivitan Nginx...'",
+      "sudo systemctl restart nginx",
+
+      "echo '>>> Valmis!'"
+    ]
+  }
+}
+
+# Outputs
+output "web_url" {
+  value = "Veebileht: http://${var.target_host}"
+}
+
+output "deployed_file_hash" {
+  description = "Deploy'tud faili MD5 hash"
+  value       = filemd5("${path.module}/files/index.html")
 }

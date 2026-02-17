@@ -39,7 +39,7 @@ resource "null_resource" "nginx_setup" {
   #
   # Muuda "1" -> "2" kui tahad uuesti deploy'da ilma destroy'ta.
   triggers = {
-    version = "1"
+    always = timestamp()
   }
 
   connection {
