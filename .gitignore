@@ -1,22 +1,29 @@
-cat > .gitignore << 'EOF'
-# Logid
 *.log
 
-# Temp
 temp/
 *.tmp
 
-# Secrets
 .env
 .env.local
 *.key
 
-# OS specific
 .DS_Store
 Thumbs.db
-EOF
+
+.terraform/
 
 *.tfstate
+*.tfstate.*
 *.tfstate.backup
-crash.log
+
+.terraformrc
+terraform.rc
+
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl
+
 output/
+crash.log
